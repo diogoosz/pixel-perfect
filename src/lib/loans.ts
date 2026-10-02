@@ -19,7 +19,7 @@ export const formatDate = (d: string) => {
 };
 
 export function daysSince(loanDate: string, today = new Date()) {
-  const [y, m, d] = loanDate.split("-").map(Number);
+  const [y = 1970, m = 1, d = 1] = loanDate.split("-").map(Number);
   const start = Date.UTC(y, m - 1, d);
   const now = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
   return Math.max(0, Math.floor((now - start) / 86_400_000));
