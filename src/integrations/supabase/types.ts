@@ -14,7 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      loans: {
+        Row: {
+          created_at: string
+          id: string
+          interest_rate: number
+          loan_date: string
+          notes: string | null
+          person_name: string
+          principal_amount: number
+          rate_period: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          interest_rate: number
+          loan_date: string
+          notes?: string | null
+          person_name: string
+          principal_amount: number
+          rate_period?: string
+          status?: string
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          interest_rate?: number
+          loan_date?: string
+          notes?: string | null
+          person_name?: string
+          principal_amount?: number
+          rate_period?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
