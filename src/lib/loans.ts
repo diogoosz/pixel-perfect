@@ -1,4 +1,4 @@
-export type Person = { id: string; user_id: string; name: string; notes: string | null; created_at: string };
+export type Person = { id: string; user_id: string; name: string; email: string | null; phone: string | null; notes: string | null; created_at: string };
 export type Payment = { id: string; user_id: string; loan_id: string; amount: number; payment_date: string; notes: string | null; created_at: string };
 export type Loan = {
   id: string; user_id: string; person_id: string; loan_date: string;
