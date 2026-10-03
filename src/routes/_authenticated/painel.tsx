@@ -1,105 +1,78 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, Landmark, LogOut, MoreHorizontal, Pencil, Plus, RotateCcw, Search, Trash2, TrendingUp } from "lucide-react";
+import { ArrowLeft, CreditCard, Landmark, LogOut, MoreHorizontal, Pencil, Plus, Search, Trash2, TrendingUp, UserRound } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import { computeLoan, formatBRL, formatDate, type Loan } from "@/lib/loans";
+import { computeLoanWithPayments, formatBRL, formatDate, type Loan, type Payment, type Person } from "@/lib/loans";
 import { LoanFormDialog, type LoanFormValues } from "@/components/LoanFormDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
-export const Route = createFileRoute("/_authenticated/painel")({
-  head: () => ({ meta: [
-    { title: "Painel — Juros Diários" },
-    { name: "description", content: "Resumo dos seus empréstimos e juros acumulados." },
-    { property: "og:title", content: "Painel — Juros Diários" },
-    { property: "og:description", content: "Resumo dos seus empréstimos e juros acumulados." },
-  ] }),
-  component: Dashboard,
-});
+export const Route = createFileRoute("/_authenticated/painel")({ component: Dashboard });
+
+type DeleteTarget = { kind: "person"; item: Person } | { kind: "loan"; item: Loan } | { kind: "payment"; item: Payment };
 
 function Dashboard() {
-  const { session } = useAuth();
-  const qc = useQueryClient();
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<"all" | "active" | "paid">("all");
-  const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<Loan | null>(null);
-  const [deleting, setDeleting] = useState<Loan | null>(null);
+  const { session } = useAuth(); const qc = useQueryClient();
+  const [selectedId, setSelectedId] = useState<string | null>(null); const [search, setSearch] = useState("");
+  const [personOpen, setPersonOpen] = useState(false); const [editingPerson, setEditingPerson] = useState<Person | null>(null);
+  const [personName, setPersonName] = useState(""); const [personNotes, setPersonNotes] = useState("");
+  const [loanOpen, setLoanOpen] = useState(false); const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
+  const [payingLoan, setPayingLoan] = useState<Loan | null>(null); const [payAmount, setPayAmount] = useState(""); const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10)); const [payNotes, setPayNotes] = useState("");
+  const [deleting, setDeleting] = useState<DeleteTarget | null>(null);
 
-  const { data: loans = [], isLoading } = useQuery({
-    queryKey: ["loans"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("loans").select("*").order("loan_date", { ascending: false });
-      if (error) throw error;
-      return data as Loan[];
-    },
-  });
-  const refresh = () => qc.invalidateQueries({ queryKey: ["loans"] });
-  const save = async (v: LoanFormValues) => {
-    const payload = { ...v, notes: v.notes || null };
-    const { error } = editing ? await supabase.from("loans").update(payload).eq("id", editing.id) : await supabase.from("loans").insert({ ...payload, user_id: session!.user.id });
-    if (error) return void toast.error("Não foi possível salvar.");
-    toast.success(editing ? "Empréstimo atualizado" : "Empréstimo adicionado"); setFormOpen(false); refresh();
-  };
-  const toggleStatus = useMutation({
-    mutationFn: async (l: Loan) => { const { error } = await supabase.from("loans").update({ status: l.status === "active" ? "paid" : "active" }).eq("id", l.id); if (error) throw error; },
-    onSuccess: () => { toast.success("Status atualizado"); refresh(); }, onError: () => toast.error("Erro ao atualizar status"),
-  });
-  const remove = async () => { if (!deleting) return; const { error } = await supabase.from("loans").delete().eq("id", deleting.id); setDeleting(null); if (error) return void toast.error("Erro ao excluir"); toast.success("Empréstimo excluído"); refresh(); };
+  const { data: people = [], isLoading } = useQuery({ queryKey: ["people"], queryFn: async () => { const { data, error } = await supabase.from("people").select("*").order("name"); if (error) throw error; return data as Person[]; } });
+  const { data: loans = [] } = useQuery({ queryKey: ["loans"], queryFn: async () => { const { data, error } = await supabase.from("loans").select("*").order("loan_date", { ascending: false }); if (error) throw error; return data as Loan[]; } });
+  const { data: payments = [] } = useQuery({ queryKey: ["payments"], queryFn: async () => { const { data, error } = await supabase.from("payments").select("*").order("payment_date", { ascending: false }); if (error) throw error; return data as Payment[]; } });
+  const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: ["people"] }), qc.invalidateQueries({ queryKey: ["loans"] }), qc.invalidateQueries({ queryKey: ["payments"] })]);
+  const selected = people.find((p) => p.id === selectedId) ?? null; const today = new Date();
+  const personLoans = loans.filter((l) => l.person_id === selectedId);
+  const rows = useMemo(() => personLoans.map((loan) => ({ loan, ...computeLoanWithPayments(loan, payments, today) })), [personLoans, payments]); // eslint-disable-line react-hooks/exhaustive-deps
+  const totals = rows.reduce((a, r) => ({ original: a.original + Number(r.loan.principal_amount), calculated: a.calculated + r.amount, paid: a.paid + r.paid, balance: a.balance + r.balance, interest: a.interest + r.interest }), { original: 0, calculated: 0, paid: 0, balance: 0, interest: 0 });
 
-  const today = new Date();
-  const rows = useMemo(() => loans.map((l) => ({ loan: l, ...computeLoan(l, today) })), [loans]); // eslint-disable-line react-hooks/exhaustive-deps
-  const active = rows.filter((r) => r.loan.status === "active");
-  const totals = active.reduce((a, r) => ({ p: a.p + Number(r.loan.principal_amount), m: a.m + r.amount }), { p: 0, m: 0 });
-  const filtered = rows.filter((r) => (status === "all" || r.loan.status === status) && r.loan.person_name.toLowerCase().includes(search.trim().toLowerCase()));
+  const openPerson = (p?: Person) => { setEditingPerson(p ?? null); setPersonName(p?.name ?? ""); setPersonNotes(p?.notes ?? ""); setPersonOpen(true); };
+  const savePerson = async () => { const name = personName.trim(); if (!name) return toast.error("Informe o nome da pessoa."); const payload = { name, notes: personNotes.trim() || null }; const { error } = editingPerson ? await supabase.from("people").update(payload).eq("id", editingPerson.id) : await supabase.from("people").insert({ ...payload, user_id: session!.user.id }); if (error) return toast.error("Não foi possível salvar a pessoa."); setPersonOpen(false); toast.success(editingPerson ? "Pessoa atualizada" : "Pessoa adicionada"); await refresh(); };
+  const saveLoan = async (v: LoanFormValues) => { if (!selected) return; const payload = { ...v, notes: v.notes || null, person_id: selected.id }; const { error } = editingLoan ? await supabase.from("loans").update(payload).eq("id", editingLoan.id) : await supabase.from("loans").insert({ ...payload, user_id: session!.user.id }); if (error) return toast.error("Não foi possível salvar o empréstimo."); setLoanOpen(false); toast.success(editingLoan ? "Empréstimo atualizado" : "Empréstimo adicionado"); await refresh(); };
+  const openPayment = (loan: Loan) => { setPayingLoan(loan); setPayAmount(""); setPayDate(new Date().toISOString().slice(0, 10)); setPayNotes(""); };
+  const savePayment = async () => { if (!payingLoan) return; const amount = Number(payAmount); const row = rows.find((r) => r.loan.id === payingLoan.id); if (!Number.isFinite(amount) || amount <= 0) return toast.error("Informe um valor válido."); if (!row || amount > row.balance + 0.005) return toast.error("O pagamento não pode ser maior que o saldo atual."); const { error } = await supabase.from("payments").insert({ user_id: session!.user.id, loan_id: payingLoan.id, amount, payment_date: payDate, notes: payNotes.trim() || null }); if (error) return toast.error("Não foi possível registrar o pagamento."); if (amount >= row.balance - 0.005) await supabase.from("loans").update({ status: "paid" }).eq("id", payingLoan.id); setPayingLoan(null); toast.success("Pagamento registrado"); await refresh(); };
+  const remove = async () => { if (!deleting) return; const table = deleting.kind === "person" ? "people" : deleting.kind === "loan" ? "loans" : "payments"; const { error } = await supabase.from(table).delete().eq("id", deleting.item.id); if (error) return toast.error("Não foi possível excluir."); if (deleting.kind === "person") setSelectedId(null); setDeleting(null); toast.success("Registro excluído"); await refresh(); };
 
-  const actions = (loan: Loan) => <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Ações"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => { setEditing(loan); setFormOpen(true); }}><Pencil className="h-4 w-4" /> Editar</DropdownMenuItem><DropdownMenuItem onClick={() => toggleStatus.mutate(loan)}>{loan.status === "active" ? <><CheckCircle2 className="h-4 w-4" /> Marcar como quitado</> : <><RotateCcw className="h-4 w-4" /> Reativar</>}</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => setDeleting(loan)}><Trash2 className="h-4 w-4" /> Excluir</DropdownMenuItem></DropdownMenuContent></DropdownMenu>;
-  const statusBadge = (loan: Loan) => loan.status === "active" ? <Badge variant="outline" className="border-success/40 bg-success-soft text-success">Ativo</Badge> : <Badge variant="secondary">Quitado</Badge>;
-  const elapsedLabel = (fullMonths: number, remainingDays: number) => `${fullMonths} ${fullMonths === 1 ? "mês" : "meses"} ${remainingDays} ${remainingDays === 1 ? "dia" : "dias"}`;
-
-  return <div className="min-h-screen">
-    <header className="border-b bg-card/60 backdrop-blur"><div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6"><div className="flex items-center gap-2 font-semibold"><Landmark className="h-5 w-5 text-primary" /> Juros Diários</div><div className="flex items-center gap-1"><span className="mr-2 hidden text-sm text-muted-foreground sm:inline">{session?.user.email}</span><ThemeToggle /><Button variant="ghost" size="icon" aria-label="Sair" onClick={() => supabase.auth.signOut()}><LogOut className="h-4 w-4" /></Button></div></div></header>
-    <main className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6">
-      <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-muted-foreground">Atualizado em {today.toLocaleDateString("pt-BR")}</p><h1 className="font-display text-4xl">Seus empréstimos</h1></div><Button size="lg" onClick={() => { setEditing(null); setFormOpen(true); }}><Plus className="h-4 w-4" /> Novo Empréstimo</Button></div>
-      <section className="grid gap-4 md:grid-cols-3"><SummaryCard label="Total original emprestado" value={formatBRL(totals.p)} hint={`${active.length} ativo(s)`} /><SummaryCard label="Total atualizado com juros" value={formatBRL(totals.m)} hint="Até hoje" /><div className="bg-hero rounded-xl p-6 text-primary-foreground shadow-card dark:text-foreground"><div className="flex items-center justify-between text-sm opacity-80">Total de juros acumulados <TrendingUp className="h-4 w-4" /></div><div className="tabular mt-3 text-3xl font-semibold">{formatBRL(totals.m - totals.p)}</div><Badge className="mt-3 bg-success text-success-foreground hover:bg-success">+{totals.p ? (((totals.m - totals.p) / totals.p) * 100).toFixed(2) : "0.00"}% rendimento</Badge></div></section>
-      <section className="rounded-xl border bg-card shadow-card">
-        <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between"><div className="relative sm:w-72"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input placeholder="Buscar por nome..." className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} /></div><Tabs value={status} onValueChange={(v) => setStatus(v as typeof status)}><TabsList><TabsTrigger value="all">Todos</TabsTrigger><TabsTrigger value="active">Ativos</TabsTrigger><TabsTrigger value="paid">Quitados</TabsTrigger></TabsList></Tabs></div>
-
-        <div className="divide-y md:hidden">
-          {isLoading ? <div className="py-12 text-center text-muted-foreground">Carregando...</div> : filtered.length === 0 ? <div className="py-12 text-center text-muted-foreground">{loans.length ? "Nenhum resultado para os filtros." : "Nenhum empréstimo ainda. Clique em “Novo Empréstimo”."}</div> : filtered.map(({ loan, fullMonths, remainingDays, amount, interest }) => <div key={loan.id} className={`p-4 ${loan.status === "paid" ? "opacity-60" : ""}`}>
-            <div className="mb-3 flex items-start justify-between gap-2"><div className="min-w-0"><div className="truncate font-semibold">{loan.person_name}</div><div className="mt-1">{statusBadge(loan)}</div></div>{actions(loan)}</div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-              <MobileField label="Data" value={formatDate(loan.loan_date)} />
-              <MobileField label="Período" value={elapsedLabel(fullMonths, remainingDays)} />
-              <MobileField label="Taxa" value={`${Number(loan.interest_rate).toLocaleString("pt-BR")}% ${loan.rate_period === "monthly" ? "a.m." : "a.a."}`} />
-              <MobileField label="Montante original" value={formatBRL(Number(loan.principal_amount))} />
-              <MobileField label="Juros" value={`+${formatBRL(interest)}`} valueClass="text-success" />
-              <MobileField label="Total com juros" value={formatBRL(amount)} valueClass="font-semibold" />
-            </div>
-          </div>)}
-        </div>
-
-        <div className="hidden overflow-x-auto md:block"><Table><TableHeader><TableRow><TableHead>Pessoa</TableHead><TableHead>Início</TableHead><TableHead className="text-right">Período</TableHead><TableHead className="text-right">Taxa</TableHead><TableHead className="text-right">Original</TableHead><TableHead className="text-right">Montante atual</TableHead><TableHead className="text-right">Juros</TableHead><TableHead>Status</TableHead><TableHead className="w-10" /></TableRow></TableHeader><TableBody>{isLoading ? <TableRow><TableCell colSpan={9} className="py-12 text-center text-muted-foreground">Carregando...</TableCell></TableRow> : filtered.length === 0 ? <TableRow><TableCell colSpan={9} className="py-12 text-center text-muted-foreground">{loans.length ? "Nenhum resultado para os filtros." : "Nenhum empréstimo ainda. Clique em “Novo Empréstimo”."}</TableCell></TableRow> : filtered.map(({ loan, fullMonths, remainingDays, amount, interest }) => <TableRow key={loan.id} className={loan.status === "paid" ? "opacity-60" : ""}><TableCell className="font-medium">{loan.person_name}</TableCell><TableCell className="tabular text-sm">{formatDate(loan.loan_date)}</TableCell><TableCell className="tabular whitespace-nowrap text-right text-sm">{elapsedLabel(fullMonths, remainingDays)}</TableCell><TableCell className="tabular text-right text-sm">{Number(loan.interest_rate).toLocaleString("pt-BR")}% {loan.rate_period === "monthly" ? "a.m." : "a.a."}</TableCell><TableCell className="tabular text-right text-sm">{formatBRL(Number(loan.principal_amount))}</TableCell><TableCell className="tabular text-right text-sm font-semibold">{formatBRL(amount)}</TableCell><TableCell className="tabular text-right text-sm text-success">+{formatBRL(interest)}</TableCell><TableCell>{statusBadge(loan)}</TableCell><TableCell>{actions(loan)}</TableCell></TableRow>)}</TableBody></Table></div>
-      </section>
+  const filteredPeople = people.filter((p) => p.name.toLowerCase().includes(search.trim().toLowerCase()));
+  return <div className="min-h-screen"><Header email={session?.user.email} />
+    <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+      {!selected ? <>
+        <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-muted-foreground">Organize os empréstimos por cliente</p><h1 className="font-display text-4xl">Pessoas</h1></div><Button size="lg" onClick={() => openPerson()}><Plus className="h-4 w-4" /> Nova pessoa</Button></div>
+        <div className="relative max-w-md"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"/><Input className="pl-9" placeholder="Buscar pessoa..." value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+        {isLoading ? <div className="py-16 text-center text-muted-foreground">Carregando...</div> : filteredPeople.length === 0 ? <div className="rounded-xl border bg-card p-12 text-center text-muted-foreground">Nenhuma pessoa cadastrada. Comece por “Nova pessoa”.</div> : <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{filteredPeople.map((p) => { const pls = loans.filter((l) => l.person_id === p.id); const debt = pls.reduce((s, l) => s + computeLoanWithPayments(l, payments, today).balance, 0); return <button key={p.id} onClick={() => setSelectedId(p.id)} className="rounded-xl border bg-card p-5 text-left shadow-card transition hover:border-primary/40"><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><div className="rounded-full bg-secondary p-2"><UserRound className="h-5 w-5"/></div><div className="min-w-0"><div className="truncate font-semibold">{p.name}</div><div className="text-xs text-muted-foreground">{pls.length} empréstimo(s)</div></div></div><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" onClick={(e) => e.stopPropagation()}><MoreHorizontal className="h-4 w-4"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={(e) => { e.stopPropagation(); openPerson(p); }}><Pencil className="h-4 w-4"/>Editar</DropdownMenuItem><DropdownMenuSeparator/><DropdownMenuItem className="text-destructive" onClick={(e) => { e.stopPropagation(); setDeleting({ kind: "person", item: p }); }}><Trash2 className="h-4 w-4"/>Excluir</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div><div className="mt-5 text-xs text-muted-foreground">Saldo a receber</div><div className="tabular mt-1 text-2xl font-semibold">{formatBRL(debt)}</div></button>; })}</div>}
+      </> : <>
+        <div className="flex flex-wrap items-center justify-between gap-4"><div className="flex items-center gap-3"><Button variant="ghost" size="icon" onClick={() => setSelectedId(null)}><ArrowLeft className="h-5 w-5"/></Button><div><p className="text-sm text-muted-foreground">Cliente</p><h1 className="font-display text-3xl sm:text-4xl">{selected.name}</h1></div></div><div className="flex gap-2"><Button variant="outline" onClick={() => openPerson(selected)}><Pencil className="h-4 w-4"/> Editar</Button><Button onClick={() => { setEditingLoan(null); setLoanOpen(true); }}><Plus className="h-4 w-4"/> Novo empréstimo</Button></div></div>
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Summary label="Total original" value={formatBRL(totals.original)} hint={`${rows.length} empréstimo(s)`}/><Summary label="Calculado com juros" value={formatBRL(totals.calculated)} hint="Antes dos pagamentos"/><Summary label="Já recebido" value={formatBRL(totals.paid)} hint="Pagamentos registrados"/><div className="bg-hero rounded-xl p-5 text-primary-foreground shadow-card dark:text-foreground"><div className="text-sm opacity-80">Saldo a receber</div><div className="tabular mt-2 text-3xl font-semibold">{formatBRL(totals.balance)}</div><div className="mt-2 flex items-center gap-1 text-xs opacity-80"><TrendingUp className="h-3.5 w-3.5"/> Juros gerados: {formatBRL(totals.interest)}</div></div></section>
+        <section className="space-y-4">{rows.length === 0 ? <div className="rounded-xl border bg-card p-12 text-center text-muted-foreground">Nenhum empréstimo para {selected.name}.</div> : rows.map((r) => <LoanCard key={r.loan.id} row={r} payments={payments.filter((p) => p.loan_id === r.loan.id)} onPay={() => openPayment(r.loan)} onEdit={() => { setEditingLoan(r.loan); setLoanOpen(true); }} onDelete={() => setDeleting({ kind: "loan", item: r.loan })} onDeletePayment={(p) => setDeleting({ kind: "payment", item: p })}/>)}</section>
+      </>}
     </main>
-    <LoanFormDialog open={formOpen} onOpenChange={setFormOpen} loan={editing} onSubmit={save} />
-    <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Excluir empréstimo?</AlertDialogTitle><AlertDialogDescription>O registro de {deleting?.person_name} será removido permanentemente.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={remove}>Excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+    <Dialog open={personOpen} onOpenChange={setPersonOpen}><DialogContent><DialogHeader><DialogTitle>{editingPerson ? "Editar pessoa" : "Nova pessoa"}</DialogTitle></DialogHeader><div className="space-y-4"><div className="space-y-2"><Label>Nome</Label><Input value={personName} onChange={(e) => setPersonName(e.target.value)} autoFocus/></div><div className="space-y-2"><Label>Observações</Label><Textarea value={personNotes} onChange={(e) => setPersonNotes(e.target.value)}/></div></div><DialogFooter><Button variant="ghost" onClick={() => setPersonOpen(false)}>Cancelar</Button><Button onClick={savePerson}>Salvar</Button></DialogFooter></DialogContent></Dialog>
+    {selected && <LoanFormDialog open={loanOpen} onOpenChange={setLoanOpen} loan={editingLoan} personName={selected.name} onSubmit={saveLoan}/>} 
+    <Dialog open={!!payingLoan} onOpenChange={(o) => !o && setPayingLoan(null)}><DialogContent><DialogHeader><DialogTitle>Registrar pagamento</DialogTitle></DialogHeader><div className="space-y-4"><div className="space-y-2"><Label>Valor pago (R$)</Label><Input type="number" min="0.01" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)}/></div><div className="space-y-2"><Label>Data</Label><Input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)}/></div><div className="space-y-2"><Label>Observação</Label><Textarea value={payNotes} onChange={(e) => setPayNotes(e.target.value)}/></div></div><DialogFooter><Button variant="ghost" onClick={() => setPayingLoan(null)}>Cancelar</Button><Button onClick={savePayment}>Registrar</Button></DialogFooter></DialogContent></Dialog>
+    <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Excluir registro?</AlertDialogTitle><AlertDialogDescription>{deleting?.kind === "person" ? "A pessoa, seus empréstimos e pagamentos serão removidos permanentemente." : "Esta ação é permanente e os totais serão recalculados."}</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction className="bg-destructive text-destructive-foreground" onClick={remove}>Excluir</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
   </div>;
 }
 
-function MobileField({ label, value, valueClass = "" }: { label: string; value: string; valueClass?: string }) {
-  return <div className="min-w-0"><div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div><div className={`tabular mt-0.5 break-words ${valueClass}`}>{value}</div></div>;
+function Header({ email }: { email?: string }) { return <header className="border-b bg-card/60 backdrop-blur"><div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6"><div className="flex items-center gap-2 font-semibold"><Landmark className="h-5 w-5 text-primary"/>Juros Diários</div><div className="flex items-center gap-1"><span className="mr-2 hidden text-sm text-muted-foreground sm:inline">{email}</span><ThemeToggle/><Button variant="ghost" size="icon" onClick={() => supabase.auth.signOut()}><LogOut className="h-4 w-4"/></Button></div></div></header>; }
+function Summary({ label, value, hint }: { label: string; value: string; hint: string }) { return <div className="rounded-xl border bg-card p-5 shadow-card"><div className="text-sm text-muted-foreground">{label}</div><div className="tabular mt-2 text-2xl font-semibold">{value}</div><div className="mt-2 text-xs text-muted-foreground">{hint}</div></div>; }
+function LoanCard({ row, payments, onPay, onEdit, onDelete, onDeletePayment }: { row: ReturnType<typeof computeLoanWithPayments> & { loan: Loan }; payments: Payment[]; onPay: () => void; onEdit: () => void; onDelete: () => void; onDeletePayment: (p: Payment) => void }) {
+  const { loan } = row; const elapsed = `${row.fullMonths} ${row.fullMonths === 1 ? "mês" : "meses"} ${row.remainingDays} ${row.remainingDays === 1 ? "dia" : "dias"}`;
+  return <div className="rounded-xl border bg-card p-4 shadow-card sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><span className="font-semibold">Empréstimo de {formatDate(loan.loan_date)}</span><Badge variant={row.balance <= 0.005 ? "secondary" : "outline"}>{row.balance <= 0.005 ? "Quitado" : "Ativo"}</Badge></div><div className="mt-1 text-xs text-muted-foreground">{elapsed} · {Number(loan.interest_rate).toLocaleString("pt-BR")}% {loan.rate_period === "monthly" ? "a.m." : "a.a."}</div></div><div className="flex gap-2">{row.balance > 0.005 && <Button size="sm" onClick={onPay}><CreditCard className="h-4 w-4"/> Registrar pagamento</Button>}<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={onEdit}><Pencil className="h-4 w-4"/>Editar</DropdownMenuItem><DropdownMenuSeparator/><DropdownMenuItem className="text-destructive" onClick={onDelete}><Trash2 className="h-4 w-4"/>Excluir</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div></div>
+    <div className="mt-5 grid grid-cols-2 gap-4 text-sm sm:grid-cols-5"><Metric label="Original" value={formatBRL(Number(loan.principal_amount))}/><Metric label="Juros" value={`+${formatBRL(row.interest)}`} success/><Metric label="Calculado" value={formatBRL(row.amount)}/><Metric label="Já pago" value={formatBRL(row.paid)}/><Metric label="Saldo" value={formatBRL(row.balance)} strong/></div>
+    {payments.length > 0 && <div className="mt-5 border-t pt-4"><div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Histórico de pagamentos</div><div className="space-y-2">{payments.map((p) => <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg bg-muted/50 px-3 py-2 text-sm"><div><span className="tabular font-medium">{formatBRL(Number(p.amount))}</span><span className="ml-2 text-muted-foreground">{formatDate(p.payment_date)}{p.notes ? ` · ${p.notes}` : ""}</span></div><Button variant="ghost" size="icon" onClick={() => onDeletePayment(p)}><Trash2 className="h-3.5 w-3.5"/></Button></div>)}</div></div>}
+  </div>;
 }
-
-function SummaryCard({ label, value, hint }: { label: string; value: string; hint: string }) {
-  return <div className="rounded-xl border bg-card p-6 shadow-card"><div className="text-sm text-muted-foreground">{label}</div><div className="tabular mt-3 text-3xl font-semibold">{value}</div><div className="mt-3 text-xs text-muted-foreground">{hint}</div></div>;
-}
+function Metric({ label, value, success, strong }: { label: string; value: string; success?: boolean; strong?: boolean }) { return <div><div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div><div className={`tabular mt-1 ${success ? "text-success" : ""} ${strong ? "font-bold" : "font-medium"}`}>{value}</div></div>; }
