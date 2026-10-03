@@ -33,7 +33,7 @@ export function LoanFormDialog({ open, onOpenChange, loan, personName, people, p
       <FormField control={form.control} name="interest_rate" render={({ field }) => <FormItem className="space-y-1.5"><FormLabel>Taxa de juros (%)</FormLabel><FormControl><Input type="number" step="0.01" min="0" {...field} /></FormControl><FormMessage /></FormItem>} />
       <FormField control={form.control} name="rate_period" render={({ field }) => <FormItem className="space-y-1.5"><FormLabel>Período</FormLabel><Select value={field.value} onValueChange={field.onChange}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="monthly">Ao mês</SelectItem><SelectItem value="yearly">Ao ano</SelectItem></SelectContent></Select><FormMessage /></FormItem>} />
     </div>
-    <FormField control={form.control} name="notes" render={({ field }) => <FormItem className="space-y-1.5"><FormLabel>Observações</FormLabel><FormControl><Textarea rows={2} {...field} /></FormControl><FormMessage /></FormItem>} />
+    <FormField control={form.control} name="notes" render={({ field }) => <FormItem className="space-y-1.5"><FormLabel>Observações (opcional)</FormLabel><FormControl><Textarea rows={2} {...field} /></FormControl><FormMessage /></FormItem>} />
     <DialogFooter className="pt-1"><Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button><Button type="submit" disabled={form.formState.isSubmitting}>{loan ? "Salvar" : "Adicionar"}</Button></DialogFooter>
   </form></Form></DialogContent></Dialog>;
 }
