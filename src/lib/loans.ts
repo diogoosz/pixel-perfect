@@ -30,22 +30,21 @@ export function monthlyRate(ratePercent: number, period: "monthly" | "yearly") {
   return period === "monthly" ? i : Math.pow(1 + i, 1 / 12) - 1;
 }
 
-/** Closed calendar months since loan date + fraction of the current open month. */
+/** Closed calendar months since loan date + days in the open month as a fraction of 30. */
 export function monthsElapsed(loanDate: string, today = new Date()) {
   const [y = 1970, m = 1, d = 1] = loanDate.split("-").map(Number);
   const ty = today.getFullYear(), tm = today.getMonth() + 1, td = today.getDate();
   let full = (ty - y) * 12 + (tm - m);
   if (td < d) full -= 1;
   if (full < 0) return 0;
-  // start of the current (open) month period
-  const anchor = new Date(y, m - 1 + full, 1);
-  const anchorDim = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate();
-  const start = Date.UTC(anchor.getFullYear(), anchor.getMonth(), Math.min(d, anchorDim));
-  const next = new Date(y, m - 1 + full + 1, 1);
-  const nextDim = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
-  const end = Date.UTC(next.getFullYear(), next.getMonth(), Math.min(d, nextDim));
+  // anniversary day in the last closed month's next month (clamped to that month's length)
+  const anchorMonth = m - 1 + full;
+  const anchorDim = new Date(y, anchorMonth + 1, 0).getDate();
+  const start = Date.UTC(y, anchorMonth, Math.min(d, anchorDim));
   const now = Date.UTC(ty, tm - 1, td);
-  return full + Math.max(0, (now - start) / (end - start));
+  const days = Math.max(0, Math.round((now - start) / 86_400_000));
+  // open month fraction always over 30 days (ex.: 01/01 -> 02/10 = 9 meses + 1/30)
+  return full + Math.min(days, 30) / 30;
 }
 
 export function computeLoan(loan: Pick<Loan, "loan_date" | "principal_amount" | "interest_rate" | "rate_period">, today = new Date()) {
