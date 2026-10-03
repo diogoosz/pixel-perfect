@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { Calendar } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,7 @@ const schema = z.object({
 });
 export type LoanFormValues = z.infer<typeof schema>;
 const empty = (): LoanFormValues => ({ loan_date: new Date().toISOString().slice(0, 10), principal_amount: 0, interest_rate: 0, rate_period: "monthly", notes: "" });
+const formatCurrencyInput = (value: number) => value ? value.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
 
 export function LoanFormDialog({ open, onOpenChange, loan, personName, people, personId, onPersonChange, onSubmit }: { open: boolean; onOpenChange: (o: boolean) => void; loan?: Loan | null; personName?: string; people?: Person[]; personId?: string; onPersonChange?: (id: string) => void; onSubmit: (v: LoanFormValues) => Promise<void> }) {
   const form = useForm<LoanFormValues>({ resolver: zodResolver(schema), defaultValues: empty() });
@@ -28,8 +30,8 @@ export function LoanFormDialog({ open, onOpenChange, loan, personName, people, p
   return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="w-[calc(100%-2rem)] max-w-md rounded-lg p-4 sm:p-5"><DialogHeader><DialogTitle className="font-display text-xl">{loan ? "Editar empréstimo" : "Novo empréstimo"}</DialogTitle></DialogHeader><Form {...form}><form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
     {selectingPerson ? <div className="space-y-1.5"><Label>Pessoa</Label><Select value={personId} onValueChange={onPersonChange}><SelectTrigger><SelectValue placeholder="Selecione a pessoa" /></SelectTrigger><SelectContent>{people.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent></Select></div> : personName ? <div className="rounded-lg bg-muted px-3 py-2 text-sm"><span className="text-muted-foreground">Pessoa: </span><span className="font-medium">{personName}</span></div> : null}
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <FormField control={form.control} name="loan_date" render={({ field }) => <FormItem className="space-y-1.5"><FormLabel>Data do empréstimo</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>} />
-      <FormField control={form.control} name="principal_amount" render={({ field }) => <FormItem className="space-y-1.5"><FormLabel>Valor (R$)</FormLabel><FormControl><Input type="number" step="0.01" min="0" {...field} /></FormControl><FormMessage /></FormItem>} />
+      <FormField control={form.control} name="loan_date" render={({ field }) => <FormItem className="space-y-1.5"><FormLabel>Data do empréstimo</FormLabel><FormControl><div className="relative"><Input type="date" max={new Date().toISOString().slice(0, 10)} className="pr-10" {...field} /><Calendar className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /></div></FormControl><FormMessage /></FormItem>} />
+      <FormField control={form.control} name="principal_amount" render={({ field }) => <FormItem className="space-y-1.5"><FormLabel>Valor (R$)</FormLabel><FormControl><Input type="text" inputMode="numeric" placeholder="20.000,00" value={formatCurrencyInput(Number(field.value))} onChange={(e) => { const digits = e.target.value.replace(/\D/g, ""); field.onChange(digits ? Number(digits) / 100 : 0); }} onBlur={field.onBlur} name={field.name} ref={field.ref} /></FormControl><FormMessage /></FormItem>} />
       <FormField control={form.control} name="interest_rate" render={({ field }) => <FormItem className="space-y-1.5"><FormLabel>Taxa de juros (%)</FormLabel><FormControl><Input type="number" step="0.01" min="0" {...field} /></FormControl><FormMessage /></FormItem>} />
       <FormField control={form.control} name="rate_period" render={({ field }) => <FormItem className="space-y-1.5"><FormLabel>Período</FormLabel><Select value={field.value} onValueChange={field.onChange}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="monthly">Ao mês</SelectItem><SelectItem value="yearly">Ao ano</SelectItem></SelectContent></Select><FormMessage /></FormItem>} />
     </div>
