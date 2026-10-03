@@ -25,14 +25,33 @@ export function daysSince(loanDate: string, today = new Date()) {
   return Math.max(0, Math.floor((now - start) / 86_400_000));
 }
 
-export function dailyRate(ratePercent: number, period: "monthly" | "yearly") {
+export function monthlyRate(ratePercent: number, period: "monthly" | "yearly") {
   const i = ratePercent / 100;
-  return Math.pow(1 + i, 1 / (period === "monthly" ? 30 : 365)) - 1;
+  return period === "monthly" ? i : Math.pow(1 + i, 1 / 12) - 1;
+}
+
+/** Closed calendar months since loan date + fraction of the current open month. */
+export function monthsElapsed(loanDate: string, today = new Date()) {
+  const [y = 1970, m = 1, d = 1] = loanDate.split("-").map(Number);
+  const ty = today.getFullYear(), tm = today.getMonth() + 1, td = today.getDate();
+  let full = (ty - y) * 12 + (tm - m);
+  if (td < d) full -= 1;
+  if (full < 0) return 0;
+  // start of the current (open) month period
+  const anchor = new Date(y, m - 1 + full, 1);
+  const anchorDim = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate();
+  const start = Date.UTC(anchor.getFullYear(), anchor.getMonth(), Math.min(d, anchorDim));
+  const next = new Date(y, m - 1 + full + 1, 1);
+  const nextDim = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+  const end = Date.UTC(next.getFullYear(), next.getMonth(), Math.min(d, nextDim));
+  const now = Date.UTC(ty, tm - 1, td);
+  return full + Math.max(0, (now - start) / (end - start));
 }
 
 export function computeLoan(loan: Pick<Loan, "loan_date" | "principal_amount" | "interest_rate" | "rate_period">, today = new Date()) {
   const days = daysSince(loan.loan_date, today);
+  const months = monthsElapsed(loan.loan_date, today);
   const principal = Number(loan.principal_amount);
-  const amount = principal * Math.pow(1 + dailyRate(Number(loan.interest_rate), loan.rate_period), days);
-  return { days, amount, interest: amount - principal };
+  const amount = principal * Math.pow(1 + monthlyRate(Number(loan.interest_rate), loan.rate_period), months);
+  return { days, months, amount, interest: amount - principal };
 }
